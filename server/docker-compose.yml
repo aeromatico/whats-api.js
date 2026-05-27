@@ -41,7 +41,9 @@ services:
       dockerfile: docker/Dockerfile.api
     restart: unless-stopped
     ports:
-      - '${API_PORT:-3000}:3000'
+      - '${API_HOST_PORT:-3000}:3000'
+    expose:
+      - '3000'
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       DATABASE_URL: postgresql://wasp:${POSTGRES_PASSWORD:-wasp_secret}@postgres:5432/whatsapp_saas
