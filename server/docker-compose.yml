@@ -1,0 +1,119 @@
+version: '3.9'
+
+services:
+  # ─── PostgreSQL ───────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: whatsapp_saas
+      POSTGRES_USER: wasp
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wasp_secret}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U wasp -d whatsapp_saas']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+  # ─── Redis ────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+  # ─── API Server ───────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    restart: unless-stopped
+    ports:
+      - '${API_PORT:-3000}:3000'
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      DATABASE_URL: postgresql://wasp:${POSTGRES_PASSWORD:-wasp_secret}@postgres:5432/whatsapp_saas
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-change_me_at_least_32_chars_long}
+      RATE_LIMIT_FREE: ${RATE_LIMIT_FREE:-60}
+      RATE_LIMIT_STARTER: ${RATE_LIMIT_STARTER:-300}
+      RATE_LIMIT_PRO: ${RATE_LIMIT_PRO:-1000}
+      RATE_LIMIT_ENTERPRISE: ${RATE_LIMIT_ENTERPRISE:-5000}
+      WEBHOOK_TIMEOUT_MS: ${WEBHOOK_TIMEOUT_MS:-10000}
+      WEBHOOK_MAX_ATTEMPTS: ${WEBHOOK_MAX_ATTEMPTS:-5}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3000/health || exit 1']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - internal
+      - external
+
+  # ─── Worker (Puppeteer + WhatsApp) ───────────────────────────────────────
+  worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      DATABASE_URL: postgresql://wasp:${POSTGRES_PASSWORD:-wasp_secret}@postgres:5432/whatsapp_saas
+      REDIS_URL: redis://redis:6379
+      SESSION_PATH: /app/sessions
+      PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
+    volumes:
+      - sessions_data:/app/sessions
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Puppeteer needs shared memory
+    shm_size: '1gb'
+    networks:
+      - internal
+
+  # ─── Migrate (one-shot) ───────────────────────────────────────────────────
+  migrate:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    command: node scripts/migrate.js
+    environment:
+      DATABASE_URL: postgresql://wasp:${POSTGRES_PASSWORD:-wasp_secret}@postgres:5432/whatsapp_saas
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+    networks:
+      - internal
+
+volumes:
+  postgres_data:
+  redis_data:
+  sessions_data:
+
+networks:
+  internal:
+    driver: bridge
+  external:
+    driver: bridge

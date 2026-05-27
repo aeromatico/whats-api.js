@@ -1,0 +1,22 @@
+version: '3.9'
+
+# Development override — mounts source code for hot reload
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    command: node --watch src/api/server.js
+    volumes:
+      - ./src:/app/src:ro
+    environment:
+      NODE_ENV: development
+
+  worker:
+    command: node --watch src/worker/index.js
+    volumes:
+      - ./src:/app/src:ro
+    environment:
+      NODE_ENV: development

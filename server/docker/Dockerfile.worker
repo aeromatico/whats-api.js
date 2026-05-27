@@ -1,0 +1,47 @@
+# ─── Worker Dockerfile (Puppeteer + Chromium) ────────────────────────────
+FROM node:20-slim
+
+# Install Chromium and dependencies for Puppeteer
+RUN apt-get update && apt-get install -y \
+    chromium \
+    fonts-liberation \
+    fonts-noto-color-emoji \
+    libatk-bridge2.0-0 \
+    libdrm2 \
+    libgbm1 \
+    libgtk-3-0 \
+    libnss3 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
+    xdg-utils \
+    --no-install-recommends \
+  && rm -rf /var/lib/apt/lists/*
+
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+
+WORKDIR /app
+
+# Copy the whatsapp-web.js library (parent directory)
+COPY ../package.json ../package-lock.json* /whatsapp-lib/
+COPY ../src/ /whatsapp-lib/src/
+COPY ../index.js /whatsapp-lib/
+
+# Install the library
+WORKDIR /whatsapp-lib
+RUN npm install --omit=dev
+
+# Back to app
+WORKDIR /app
+COPY server/package.json ./
+# Use local whatsapp-web.js
+RUN npm install --omit=dev && \
+    npm install /whatsapp-lib --no-save
+
+COPY server/src/ ./src/
+COPY server/scripts/ ./scripts/
+
+RUN mkdir -p /app/sessions
+
+CMD ["node", "src/worker/index.js"]
